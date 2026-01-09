@@ -1,4 +1,4 @@
-name: 🐳 Build and Push Docker Image (Fixed)
+name: Build and Push Docker Image
 
 on:
   push:
@@ -13,75 +13,49 @@ on:
       - 'Dockerfile'
       - 'index.js'
       - 'package.json'
-  workflow_dispatch: # 保留手动触发能力
+  workflow_dispatch:
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: ⬇️ Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🔐 Log in to GitHub Container Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🛠️ Set up Docker Buildx (with stability fixes)
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            image=moby/buildkit:master
-            network=host
 
-      - name: 📦 Restore Build Cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
-      - name: 🏗️ Build and Push Docker Image (Single Platform First)
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          # 关键修复1：首次构建只推送到主分支，且使用固定镜像名
           push: ${{ github.event_name != 'pull_request' }}
-          # 关键修复2：先构建单平台确保稳定
-          platforms: linux/amd64
-          # 关键修复3：使用正确的、固定的镜像名称和标签
+          platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/${{ github.repository_owner }}/2026100:8082
             ghcr.io/${{ github.repository_owner }}/2026100:latest
-          # 关键修复4：添加稳定的构建参数
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-          # 关键修复5：使用更可靠的本地缓存路径
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
-          # 保留原有的标签信息
+            ghcr.io/${{ github.repository_owner }}/2026100:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=HTTP Server
             org.opencontainers.image.licenses=MIT
-          # 关键修复6：添加超时和输出设置
-          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/2026100,push-by-digest=true
-          provenance: false # 简化首次构建
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      # 可选：验证步骤（强烈推荐）
-      - name: ✅ Verify Pushed Image
-        if: success() && github.event_name != 'pull_request'
+      # 可选：简单验证（只在推送时）
+      - name: Verify pushed image
+        if: github.event_name != 'pull_request'
         run: |
-          echo "等待5秒让镜像同步..."
-          sleep 5
-          echo "尝试拉取验证镜像..."
-          docker pull ghcr.io/${{ github.repository_owner }}/2026100:8082
-          echo "验证镜像摘要..."
-          docker inspect ghcr.io/${{ github.repository_owner }}/2026100:8082 --format='{{.RepoDigests}}'
+          sleep 10
+          docker pull ghcr.io/${{ github.repository_owner }}/2026100:latest
+          echo "Image pulled successfully"
